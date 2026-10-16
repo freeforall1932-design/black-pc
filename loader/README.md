@@ -38,7 +38,11 @@ largest that fits the screen), `--fullscreen` starts borderless fullscreen. `--g
 output after the game's own gamma ramp (default 1.0 / 1.0; `--no-ramp` shows the raw framebuffer). `--mouse-sens K` (0.022 degrees x K per count, default 2.0) and
 `--mouse-invert` tune mouse look; auto-aim (the game's view pull toward enemies) is off by default, `--autoaim` turns it on. A / START skip every movie, also ones the game only lets you skip once earned; `--no-movie-skip` (or unticking Game > Skip any movie) keeps the original rule. `--fov D` sets the horizontal field of view in play (50-120 degrees, default 70 = the game's; Video > Field of view, live; 86 in widescreen = the 4:3 picture's height). `--fps 30|60` (default 60; 30 is the original). `--reverb-gain K`
 (default 1.0) / `--no-reverb` for the room reverb. `--no-aa` turns off the anti-aliasing, `--no-seamfill` the
-filling of hairline cracks between geometry pieces (Video > Fill geometry seams).
+filling of hairline cracks between geometry pieces (Video > Fill geometry seams). `--texture-pack <dir>` loads
+replacement textures by content hash from `<dir>` (default: a `textures` folder next to black.exe, if present;
+`src/d3d/texture.cpp`); `--dump-textures <dir>` writes every distinct texture the game uses there as a correctly
+named PNG to seed a pack from. Both are unverified against the real game (written without a game dump, Ghidra or a
+Windows toolchain available): build and test before relying on them.
 
 `black.exe` is a windowed program: no console window opens. Started from a command prompt it prints a short summary
 there (startup, setup errors, exit, crashes); the full log is in `black.log`.

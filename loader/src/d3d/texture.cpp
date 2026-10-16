@@ -2,6 +2,12 @@
 // A8R8G8B8, DXT data is uploaded as is. Host copies are cached per resource header and re-uploaded when
 // the header changes, the game locks the texture, or a sampled hash of the texel data changes (checked at the
 // first use in a frame, every 16th frame for textures that have not changed for a while).
+// Texture packs (mod support, issue: "texture pack/mod support" requests on the source repo): --dump-textures
+// writes every distinct texture to PNG, --texture-pack loads a matching PNG back instead of the Xbox data. Both
+// keyed by the same name (content hash + shape + format) so a dump is already a valid pack seed. This only needs
+// the existing D3D texture hook (no game-binary addresses), but is unverified beyond code review: there is no
+// game dump, Ghidra, or Windows/MSVC toolchain available where this was written to build or run it against the
+// real game. Build and playtest on Windows with your own XBE before relying on it.
 #include "d3d/device.h"
 #include "d3d/dispatch.h"
 #include "d3d/host.h"
@@ -10,8 +16,11 @@
 
 #include <algorithm>
 #include <cstring>
+#include <set>
 #include <unordered_map>
 #include <vector>
+
+#include <wincodec.h>
 
 namespace xd3d {
 namespace {
@@ -75,6 +84,59 @@ struct Swizzle {
 uint32_t expand5(uint32_t v) { return (v << 3) | (v >> 2); }
 uint32_t expand6(uint32_t v) { return (v << 2) | (v >> 4); }
 uint32_t expand4(uint32_t v) { return v * 17; }
+
+// Standard BC1/BC2/BC3 ("DXT1/3/5") block decode, for --dump-textures only (the normal upload path hands
+// compressed data to Direct3D as is, decode() above never runs on it). Public, well-documented algorithm,
+// not derived from the game; approximate rounding is fine for a texture-pack reference image.
+void decode_dxt_block(const uint8_t *p, uint32_t fmt, uint32_t out[16])
+{
+    auto rgb565 = [](uint16_t c) -> uint32_t {
+        return 0xFF000000u | expand5((c >> 11) & 31) << 16 | expand6((c >> 5) & 63) << 8 | expand5(c & 31);
+    };
+    auto lerp_byte = [](int a, int b, int wa, int wb, int wsum) -> uint8_t { return (uint8_t)((a * wa + b * wb) / wsum); };
+
+    const uint8_t *alpha4 = nullptr; // DXT3: explicit 4-bit alpha block
+    uint8_t a0 = 255, a1 = 0;        // DXT5: interpolated alpha endpoints
+    uint64_t alpha_bits = 0;         // DXT5: 16 x 3-bit indices
+    const uint8_t *cb = p;           // colour block (8 bytes)
+    if (fmt == XFMT_DXT3) {
+        alpha4 = p;
+        cb = p + 8;
+    } else if (fmt == XFMT_DXT5) {
+        a0 = p[0];
+        a1 = p[1];
+        for (int i = 0; i < 6; i++) alpha_bits |= (uint64_t)p[2 + i] << (8 * i);
+        cb = p + 8;
+    }
+
+    uint16_t c0 = cb[0] | (cb[1] << 8), c1 = cb[2] | (cb[3] << 8);
+    uint32_t idx = cb[4] | (cb[5] << 8) | (cb[6] << 16) | (cb[7] << 24);
+    uint32_t cols[4] = {rgb565(c0), rgb565(c1), 0, 0};
+    const uint8_t *b0 = (const uint8_t *)&cols[0], *b1 = (const uint8_t *)&cols[1];
+    bool punchthrough = fmt == XFMT_DXT1 && c0 <= c1; // DXT1 only: 3 colours + transparent black
+    uint8_t *b2 = (uint8_t *)&cols[2], *b3 = (uint8_t *)&cols[3];
+    for (int k = 0; k < 3; k++) {
+        b2[k] = punchthrough ? lerp_byte(b0[k], b1[k], 1, 1, 2) : lerp_byte(b0[k], b1[k], 2, 1, 3);
+        b3[k] = punchthrough ? 0 : lerp_byte(b0[k], b1[k], 1, 2, 3);
+    }
+    b2[3] = 0xFF;             // cols[2] is always opaque (its alpha may still be overwritten per texel below)
+    b3[3] = punchthrough ? 0 : 0xFF; // cols[3] is the transparent-black slot only in DXT1's 3-colour mode
+
+    for (int i = 0; i < 16; i++) {
+        uint32_t texel = cols[(idx >> (2 * i)) & 3];
+        if (alpha4) {
+            uint8_t a = ((alpha4[i / 2] >> ((i & 1) * 4)) & 0xF) * 17;
+            texel = (texel & 0x00FFFFFF) | ((uint32_t)a << 24);
+        } else if (fmt == XFMT_DXT5) {
+            uint32_t ai = (uint32_t)((alpha_bits >> (3 * i)) & 7);
+            uint8_t a;
+            if (a0 > a1) a = ai == 0 ? a0 : ai == 1 ? a1 : lerp_byte(a0, a1, 8 - ai, ai - 1, 7);
+            else a = ai == 0 ? a0 : ai == 1 ? a1 : ai == 6 ? 0 : ai == 7 ? 255 : lerp_byte(a0, a1, 6 - ai, ai - 1, 5);
+            texel = (texel & 0x00FFFFFF) | ((uint32_t)a << 24);
+        }
+        out[i] = texel;
+    }
+}
 
 // Decode one texel of an uncompressed Xbox format into A8R8G8B8.
 uint32_t decode(uint32_t fmt, const uint8_t *p, const uint32_t *pal)
@@ -216,7 +278,144 @@ void refill(IDirect3DBaseTexture9 *base, Resource *r, Palette *pal)
     }
 }
 
-IDirect3DBaseTexture9 *create_and_upload(Resource *r, Palette *pal)
+// ---- texture packs (mod support): a disk PNG by content hash instead of / in addition to the Xbox data ----
+
+bool g_tex_pack_checked;      // the pack folder's existence is checked once at the first texture, not every one
+bool g_tex_pack_enabled;
+std::wstring g_tex_pack_dir;
+std::set<uint32_t> g_dumped_hashes; // --dump-textures: hashes already written this run
+
+// hash_WxHxFORMAT.png: a dump and a pack entry for the same texture always share this name, so a dump folder
+// edited in place is already a valid --texture-pack folder.
+std::wstring tex_file_name(uint32_t hash, uint32_t w, uint32_t h, uint32_t fmt)
+{
+    wchar_t buf[64];
+    swprintf(buf, 64, L"%08x_%ux%u_", hash, w, h); // matches the swprintf(buf, count, ...) used elsewhere in this project
+    return buf + widen(format_info(fmt).name) + L".png";
+}
+
+void ensure_pack_checked()
+{
+    if (g_tex_pack_checked) return;
+    g_tex_pack_checked = true;
+    g_tex_pack_dir = g_cfg.texture_pack_dir;
+    DWORD attr = g_tex_pack_dir.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesW(g_tex_pack_dir.c_str());
+    g_tex_pack_enabled = attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    logf("[tex] texture pack folder '%s': %s", narrow(g_tex_pack_dir).c_str(),
+         g_tex_pack_enabled ? "found, overrides enabled" : "not found, no overrides (--texture-pack <dir>)");
+}
+
+// Any format WIC can read (PNG, DDS with the Windows 10+ WIC codec, BMP, JPG, ...) decoded to top-left-origin
+// 32bpp BGRA. False if the file is missing or unreadable: callers fall back to the Xbox texture.
+bool wic_load_bgra(const std::wstring &path, std::vector<uint8_t> *px, UINT *w, UINT *h)
+{
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    IWICImagingFactory *f = nullptr;
+    IWICBitmapDecoder *dec = nullptr;
+    IWICBitmapFrameDecode *frame = nullptr;
+    IWICFormatConverter *conv = nullptr;
+    bool ok = false;
+    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f))) &&
+        SUCCEEDED(f->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad, &dec)) &&
+        SUCCEEDED(dec->GetFrame(0, &frame)) && SUCCEEDED(f->CreateFormatConverter(&conv)) &&
+        SUCCEEDED(conv->Initialize(frame, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom)) &&
+        SUCCEEDED(conv->GetSize(w, h)) && *w && *h) {
+        px->resize((size_t)*w * *h * 4);
+        ok = SUCCEEDED(conv->CopyPixels(nullptr, *w * 4, (UINT)px->size(), px->data()));
+    }
+    if (conv) conv->Release();
+    if (frame) frame->Release();
+    if (dec) dec->Release();
+    if (f) f->Release();
+    return ok;
+}
+
+bool wic_save_bgra(const std::wstring &path, const uint8_t *bgra, uint32_t w, uint32_t h)
+{
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    IWICImagingFactory *f = nullptr;
+    IWICStream *st = nullptr;
+    IWICBitmapEncoder *enc = nullptr;
+    IWICBitmapFrameEncode *fr = nullptr;
+    bool ok = false;
+    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f))) &&
+        SUCCEEDED(f->CreateStream(&st)) && SUCCEEDED(st->InitializeFromFilename(path.c_str(), GENERIC_WRITE)) &&
+        SUCCEEDED(f->CreateEncoder(GUID_ContainerFormatPng, nullptr, &enc)) &&
+        SUCCEEDED(enc->Initialize(st, WICBitmapEncoderNoCache)) && SUCCEEDED(enc->CreateNewFrame(&fr, nullptr)) &&
+        SUCCEEDED(fr->Initialize(nullptr)) && SUCCEEDED(fr->SetSize(w, h))) {
+        WICPixelFormatGUID pf = GUID_WICPixelFormat32bppBGRA;
+        fr->SetPixelFormat(&pf);
+        ok = SUCCEEDED(fr->WritePixels(h, w * 4, w * h * 4, (BYTE *)bgra)) && SUCCEEDED(fr->Commit()) && SUCCEEDED(enc->Commit());
+    }
+    if (fr) fr->Release();
+    if (enc) enc->Release();
+    if (st) st->Release();
+    if (f) f->Release();
+    return ok;
+}
+
+// A 2D override texture built straight from the PNG, at the PNG's own size (an upscale pack just needs a
+// bigger image): one mip level, no attempt to match the original's compression or generate further mips yet.
+// Cube and volume textures are not overridden (rare in this game's HUD/world art; original data is used).
+IDirect3DBaseTexture9 *try_load_override(uint32_t hash, uint32_t w, uint32_t h, uint32_t fmt)
+{
+    ensure_pack_checked();
+    if (!g_tex_pack_enabled) return nullptr;
+    std::wstring path = g_tex_pack_dir + L"\\" + tex_file_name(hash, w, h, fmt);
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return nullptr;
+    std::vector<uint8_t> px;
+    UINT pw = 0, ph = 0;
+    if (!wic_load_bgra(path, &px, &pw, &ph)) {
+        logf("[tex] override '%s' could not be read, using the original texture", narrow(path).c_str());
+        return nullptr;
+    }
+    IDirect3DTexture9 *t = nullptr;
+    if (FAILED(host3d::dev()->CreateTexture(pw, ph, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &t, nullptr))) return nullptr;
+    D3DLOCKED_RECT lr;
+    if (SUCCEEDED(t->LockRect(0, &lr, nullptr, 0))) {
+        for (UINT y = 0; y < ph; y++) memcpy((uint8_t *)lr.pBits + y * lr.Pitch, px.data() + (size_t)y * pw * 4, pw * 4);
+        t->UnlockRect(0);
+    }
+    logf("[tex] override applied: %s (original %ux%u -> pack %ux%u)", narrow(path).c_str(), w, h, pw, ph);
+    return t;
+}
+
+// --dump-textures: write the first appearance of each distinct (hash, shape, format) texture as PNG, so a
+// texture pack has something to start from. 2D only (cube/volume textures are skipped, noted once).
+void maybe_dump_texture(const PixelContainer *pc, uint32_t fmt, uint32_t w, uint32_t h, bool cube, uint32_t hash, const uint32_t *palette)
+{
+    if (g_cfg.texture_dump_dir.empty() || !g_dumped_hashes.insert(hash).second) return;
+    if (cube) {
+        KNOTE_ONCE("--dump-textures: cube textures are not dumped yet");
+        return;
+    }
+    const FormatInfo &fi = format_info(fmt);
+    std::vector<uint8_t> px((size_t)w * h * 4);
+    if (fi.compressed) {
+        uint32_t pitch, lw, lh;
+        uint32_t off = texture_level_offset(pc, 0, 0, &pitch, &lw, &lh); // lw/lh == w/h here (level 0, same source as pixel_container_dims)
+        (void)lw;
+        (void)lh;
+        const uint8_t *src = (const uint8_t *)phys_to_virt(pc->Data) + off;
+        uint32_t block_bytes = fi.bpp * 2;             // 8 bytes/block DXT1, 16 DXT3/5
+        uint32_t bw = pitch / block_bytes, bh = (h + 3) / 4; // bw from the authoritative row pitch, not recomputed
+        for (uint32_t by = 0; by < bh; by++)
+            for (uint32_t bx = 0; bx < bw; bx++) {
+                uint32_t texels[16];
+                decode_dxt_block(src + (size_t)by * pitch + (size_t)bx * block_bytes, fmt, texels);
+                for (uint32_t ty = 0; ty < 4 && by * 4 + ty < h; ty++)
+                    for (uint32_t tx = 0; tx < 4 && bx * 4 + tx < w; tx++)
+                        *(uint32_t *)&px[((size_t)(by * 4 + ty) * w + (bx * 4 + tx)) * 4] = texels[ty * 4 + tx];
+            }
+    } else {
+        upload_level(pc, 0, 0, px.data(), w * 4, palette);
+    }
+    CreateDirectoryW(g_cfg.texture_dump_dir.c_str(), nullptr);
+    std::wstring path = g_cfg.texture_dump_dir + L"\\" + tex_file_name(hash, w, h, fmt);
+    if (wic_save_bgra(path, px.data(), w, h)) logf("[tex] dumped %s", narrow(path).c_str());
+}
+
+IDirect3DBaseTexture9 *create_and_upload(Resource *r, Palette *pal, uint32_t hash)
 {
     auto *pc = (PixelContainer *)r;
     uint32_t fmt = fmt_of(pc);
@@ -230,6 +429,10 @@ IDirect3DBaseTexture9 *create_and_upload(Resource *r, Palette *pal)
         return nullptr;
     }
     const uint32_t *palette = pal ? (const uint32_t *)phys_to_virt(pal->Data) : nullptr;
+    maybe_dump_texture(pc, fmt, w, h, cube, hash, palette);
+    if (!cube) {
+        if (IDirect3DBaseTexture9 *ov = try_load_override(hash, w, h, fmt)) return ov;
+    }
     D3DFORMAT hf = host_format(fmt);
     IDirect3DDevice9 *dev = host3d::dev();
     if (cube) {
@@ -348,7 +551,7 @@ IDirect3DBaseTexture9 *host_texture(Resource *r, Palette *pal)
     }
     if (stale) {
         if (e.tex) e.tex->Release();
-        e.tex = create_and_upload(r, pal);
+        e.tex = create_and_upload(r, pal, hash);
         perf::add_texture_upload(bytes);
         e.data = pc->Data;
         e.format = pc->Format;
