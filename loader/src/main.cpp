@@ -91,6 +91,10 @@ void usage()
            "  --no-movie-skip   movies skip only as in the original (default: A / START skip every movie)\n"
            "  --no-pc-menus     no PC SETTINGS pages in the game's Options menu (built at start into cache\\menus\n"
            "                    next to black.exe)\n"
+           "  --texture-pack <dir>  replace textures with PNGs from <dir> named hash_WxH_FORMAT.png (default:\n"
+           "                        <port folder>\\textures if that folder exists; d3d/texture.cpp)\n"
+           "  --dump-textures <dir> write every distinct texture the game uses to <dir> as PNG, named so it can\n"
+           "                        be edited and used directly as a --texture-pack folder\n"
            "  --gain K          output gain after the game's gamma ramp (default 1.0; F5/F6 adjust live)\n"
            "  --no-ramp         ignore the game's gamma ramp (no fades, half brightness: the raw framebuffer)\n"
            "  --no-aa           no anti-aliasing (default: edge-directed post filter; F9 toggles)\n"
@@ -212,6 +216,8 @@ bool parse_args()
             if (!next(g_cfg.press_file)) return false;
         } else if (a == L"--no-movie-skip") { g_cfg.skip_movies = false; settings_mark_cli("skipanymovie"); }
         else if (a == L"--no-pc-menus") g_cfg.pc_menus = false;
+        else if (a == L"--texture-pack") { if (!next(g_cfg.texture_pack_dir)) return false; }
+        else if (a == L"--dump-textures") { if (!next(g_cfg.texture_dump_dir)) return false; }
         else if (a == L"--timer-vblank") g_cfg.timer_vblank = true;
         else if (a == L"--display-vblank") g_cfg.display_vblank = true;
         else if (a == L"--perf-at") {
@@ -306,6 +312,9 @@ bool parse_args()
     g_cfg.game_dir = slash == std::wstring::npos ? L"." : target.substr(0, slash);
     if (g_cfg.hdd_dir.empty()) g_cfg.hdd_dir = g_cfg.port_dir + L"\\savedata";
     if (g_cfg.log_path.empty()) g_cfg.log_path = g_cfg.port_dir + L"\\black.log";
+    // Only an existing folder turns overrides on (most players have none): a missing --texture-pack dir would
+    // otherwise silently do nothing, so default to looking for one next to black.exe instead of requiring the flag.
+    if (g_cfg.texture_pack_dir.empty()) g_cfg.texture_pack_dir = g_cfg.port_dir + L"\\textures";
     settings_load(); // black.ini in the port folder; flags given above keep their values
     if (g_cfg.symbols_path.empty() && GetFileAttributesW(L"notes\\functions.csv") != INVALID_FILE_ATTRIBUTES)
         g_cfg.symbols_path = L"notes\\functions.csv";

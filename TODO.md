@@ -66,6 +66,16 @@ Open work on the BLACK PC port. Findings and addresses live in `NOTES.md`; this 
 - [ ] 3D sound: cones, doppler and the per-voice rolloff curve are ignored (distance + pan only).
 - [ ] Output often reaches full scale (soft limiter active); check voice/mix-bin headroom against the Xbox.
 
+## Mods
+
+- [x] Texture packs: `--texture-pack <dir>` / `--dump-textures <dir>` (`src/d3d/texture.cpp`), by content hash so a
+      dump is already a valid pack. Cube/volume textures and mipmap generation for overrides are not done yet.
+      Written without a game dump, Ghidra or a Windows toolchain available (see `notes/issue-feasibility-report.md`
+      for why) — compiles by inspection only, needs a real build + playtest to confirm.
+- [ ] Blood colour, enemy HP ("bulletsponge"), LOD distance: these are specific values/constants inside the game's
+      own code, not texture-hook-level changes; need addresses found by decompiling the real `default.xbe`
+      (Ghidra/REA), which needs a Windows machine with the user's own game dump.
+
 ## Open questions
 
 - [ ] Where the Xbox re-fits the viewport to a smaller render target (the light-shaft pass relies on it; the HLE

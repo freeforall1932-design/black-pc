@@ -78,6 +78,15 @@ struct Config {
     bool known_build = false;  // the XBE is the NTSC-U build the address tables are for (main.cpp)
     std::wstring game_override; // --game-override: files there replace the game's of the same relative path
     std::wstring menu_cache;    // the port's rebuilt front-end files (fe/pages.cpp), served like --game-override after it
+    // Texture packs (d3d/texture.cpp), independent of --game-override (which only replaces files the game reads
+    // from disk, not the textures it decodes from its own memory). Both are named by the same scheme (content
+    // hash + shape + format), so a dump is already a valid pack seed: --dump-textures <dir> writes every
+    // distinct texture seen to <dir> as PNG; --texture-pack <dir> (default <port_dir>\textures if that folder
+    // exists) looks there first and uses a matching PNG instead of the Xbox data, at the PNG's own size (so a
+    // bigger PNG is an upscale). Unverified beyond code review: needs a build against the real XBE to confirm
+    // (no game files/Ghidra/Windows toolchain in the sandbox that wrote this).
+    std::wstring texture_pack_dir;
+    std::wstring texture_dump_dir;
     bool pc_menus = true;       // build the in-game PC SETTINGS pages (--no-pc-menus: the game's own menus only)
     std::wstring press_file;    // --press-file (tests): presses and screenshot requests appended by a driver
     int fps = 60;              // 60 (default): swap interval TWO paced as ONE, world step 1/60 s, weapon refire kept at

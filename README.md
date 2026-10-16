@@ -119,6 +119,24 @@ The game lets you skip a movie only once you have earned it (the intro and a mis
 mission, the logos never). The port lets A, START or Enter skip every movie; set PC SETTINGS > AUDIO AND GAME > SKIP ANY
 MOVIE to off (or start with `--no-movie-skip`) for the original rule.
 
+## Mods
+
+**Texture packs.** `black.exe` can swap a texture the game draws for a PNG from disk, matched by the texture's own
+content (not by file path, since the game never reads textures from files): drop PNGs named `hash_WxH_FORMAT.png`
+into a `textures` folder next to `black.exe` (or point `--texture-pack <dir>` elsewhere) and a matching one is used
+in place of the original, at the PNG's own size — a bigger PNG is an upscale. To find out what to name a
+replacement, run once with `--dump-textures <dir>`: it writes every distinct texture the game uses to `<dir>` with
+the exact name a pack needs, so a dump folder edited in place already works as a texture pack. Cube and volume
+textures aren't covered yet (uncommon in this game's art); dumped DXT textures go through a standalone decoder
+(`loader/src/d3d/texture.cpp`), so double-check a few dumps against what you see in game before building a whole
+pack around them.
+
+**Removing the reload/hit blur.** Until the port has a native toggle for it, a community workaround exists:
+[ReShade](https://reshade.me/) (pick the DirectX 9 add-on-support build) plus
+[ShaderToggler](https://github.com/FransBouma/ShaderToggler) (the x86 build) bound to a hotkey (Caps Lock in the
+original report) turns the blur pass off on demand. See [issue #15 on the source
+repo](https://github.com/Spark198rus/black-pc/issues/15) for the exact files and settings.
+
 ## Known issues
 
 - The game was made for 30 fps; at 60 (the default) something may still run at the wrong speed (PC SETTINGS > DISPLAY >
@@ -127,6 +145,14 @@ MOVIE to off (or start with `--no-movie-skip`) for the original rule.
 - Audio: the reverb is an approximation of the Xbox's, some effect sends are not mixed, there is no subwoofer
   channel, and 3D sound uses distance and panning only.
 - **Only the NTSC-U build is supported** (`--force` tries another build, which will most likely fail).
+- **Antivirus / Defender false positives.** Some scanners (Microsoft Defender, Malwarebytes) have flagged release
+  builds with generic heuristic labels (`Trojan:Script/Wacatac.H!ml`, `W32.Malware.1E0023F6`
+  MachineLearning/Anomalous). These are heuristic detections on an unusual, AI-assisted recomp/decomp binary, not a
+  known, reproducible payload; no one has reported an actual infection. If your scanner flags it: check the SHA-256
+  of what you downloaded against the release page, build from source yourself instead if you'd rather not trust the
+  binary, and consider reporting the false positive to your AV vendor (Microsoft's submission page for Defender,
+  Malwarebytes' forum) so it gets whitelisted for everyone. Longer term this needs code-signing and vendor
+  submissions on the maintainer's side, which is outside what a source change can fix.
 
 ## Building from source
 
