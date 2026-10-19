@@ -32,7 +32,7 @@ found yet), I cannot find it here — that step is blocked by points 1 and 2 abo
 
 | # | Issue | Naive (ideal env) | Recalculated (this session) | Why |
 |---|---|---|---|---|
-| [#12](https://github.com/Spark198rus/black-pc/issues/12) | Support for higher FPS | 90% | **100% — already shipped** | `README.md`/`TODO.md` show 60 fps has been the default since 2026-10-12 (world step 1/60s, weapon refire/blur matched). Nothing to build; just confirm with the reporter and close. |
+| [#12](https://github.com/Spark198rus/black-pc/issues/12) | Support for higher FPS | 90% | **100% — already shipped; audited 2026-10-16, three real defects fixed** | `README.md`/`TODO.md` show 60 fps has been the default since 2026-10-12 (world step 1/60s, weapon refire/blur matched). Nothing to build; just confirm with the reporter and close. |
 | [#1](https://github.com/Spark198rus/black-pc/issues/1) | Widescreen fixes (HUD stretch, FMV letterbox) | 65% | **~20%** | `NOTES.md` already documents the general widescreen flag and one UI-rect-shift function (`FUN_00113E70`, menus only), but the *gameplay* HUD (health/ammo bars) and FMV scaling are separate, undocumented draw paths. Finding them needs fresh decompilation of the real binary — blocked. Also worth noting: this may partly be the *original 2006 Xbox game's own* widescreen behavior (common for the era), not a porting bug, which changes the scope from "fix" to "new feature". |
 | [#6](https://github.com/Spark198rus/black-pc/issues/6) | Crash on save/autosave | 75% | **~15%** | Unusually good repro data is already in the issue: exact EIP (`0xc49fe`), the faulting opcode (`89 0a` = `mov [edx],ecx`), a full register dump, and the preceding log line (`StartSaveProfile` right after `StartAutosaveSelect`). That's exactly what Ghidra/REA-style tooling is for — decompile `0xc49fe`, see what should have initialized `edx`. But I can't open the binary at all, so I can only hypothesize (most likely something in the HLE's HDD/file emulation returns data the real Xbox save flow doesn't expect, especially since the reporter suspects a Linux/Wine angle). A confident fix needs the real analysis step. |
 | [#8](https://github.com/Spark198rus/black-pc/issues/8) | Texture packs/mod support, red blood, less bulletsponge HP, LOD increase | 55% (mixed) | **~15-20% overall, uneven by sub-ask** | Texture-pack override (~45%): the loader already intercepts D3D texture calls (`loader/src/d3d/texture.cpp`), so a "load replacement texture by hash" layer is a plausible source-level addition on top of an *existing* hook point, no new RE strictly required — but still unverifiable without a build. Blood color / enemy HP / LOD (~10-15% each): these are specific data values or shader tints inside the game binary with no existing notes pointing at them; locating them needs fresh RE on the real `default.xbe` — blocked. |
@@ -54,7 +54,25 @@ branch `arena/972ccd37-black-pc`) — nothing was posted, commented, or closed o
 - **Done: #12 (higher FPS) tracked as already resolved.** `TODO.md`/`README.md` already show 60 fps shipped as the
   default; no code change was needed. Since I'm not touching the source repo's tracker, this is just recorded
   here rather than closed upstream — the fork maintainer can do that if/when they want to.
-- **Done: a native texture-pack mechanism for #8**, added at `loader/src/d3d/texture.cpp` (`--texture-pack <dir>` /
+
+  **Amendment (2026-10-16): audited the shipped 60 fps code** — the row above was too generous as an audit.
+  `notes/higher-fps-audit.md` is the result. In short, three defects that were real: a build could come up at
+  60 fps with the weapon fire rate 33% too fast, because the patches were applied piecemeal instead of gated;
+  the refire rounding reproduced the *ideal* 30 Hz beat rather than the game's own float timer, which is
+  up to 16.7% too fast at intervals that are exact multiples of 0.1 s (0.2/0.3/0.4/0.5 s, 1.5-5.0 s); and the
+  thunks inserted into the weapon state machine preserved neither EFLAGS nor xmm0-7. Two things a support
+  request needed were missing as well: a PC that cannot hold 60 fps silently runs the world in slow motion,
+  and nothing said whether the port had found all of the game's 30 Hz-quantised code. All five now have a fix
+  or a runtime diagnostic in this fork, verified as far as this sandbox allows (the refire model runs under the
+  sandbox's g++: 4999 intervals from 2 ms to 5 s, zero mismatches, the old formula missed 40).
+
+  Unchanged and still the core of the answer: **more than 60 fps is not a settings change.** The game steps one
+  fixed frame time per frame (one step per frame, no accumulator), so 120 fps means 1/120 s steps plus a vblank
+  path that can follow a 120 Hz display (the display sync and the fallback timer are both ~59.94 Hz today) plus
+  redoing the same 30 Hz-quantisation audit at the new rate — and the port's own per-frame cost (5-6 ms on the
+  reference Ryzen 2600 + RTX 2060, ~15 ms on the i5-4300U/HD 4400 laptop) does not fit the 8.3 ms budget before
+  the game, the driver or the GPU gets any. The honest reply to #12 is "60 fps is there, and now audited; a
+  higher rate is not worth it yet, and here is why" — posting that upstream is still the user's call.- **Done: a native texture-pack mechanism for #8**, added at `loader/src/d3d/texture.cpp` (`--texture-pack <dir>` /
   `--dump-textures <dir>`, default `textures\` next to `black.exe`), documented in `README.md` (Mods),
   `loader/README.md`, and `TODO.md`. This only needed the *existing* D3D texture hook point, not new addresses in
   the game binary, so it was buildable from here — but it has **not been compiled as part of the loader**: there is

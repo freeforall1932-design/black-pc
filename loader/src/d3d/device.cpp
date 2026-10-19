@@ -1006,12 +1006,37 @@ HRESULT __stdcall D3DDevice_Clear(uint32_t Count, const D3DRECT *pRects, uint32_
     return D3D_OK;
 }
 
+// The world steps a fixed frame time per frame, so a frame that misses its vblank is not a dropped frame but
+// lost time: the game runs slower than real time. Nothing tells the player that (the performance recorder
+// knows, but only while it records), so say it once in a while - a bug report then says "my PC cannot keep
+// 60 fps" instead of "the game feels slow". `taken` vblanks against `interval` expected is what the perf
+// recording calls a late frame.
+void report_slow_motion(uint32_t taken, uint32_t interval)
+{
+    if (!interval) return;
+    static uint32_t frames, late;
+    static ULONGLONG reported;
+    if (taken > interval) late++;
+    if (++frames < 600) return; // about 10 s at 60 fps
+    uint32_t pct = late * 100 / frames;
+    ULONGLONG now = GetTickCount64();
+    if (pct >= 10 && now - reported >= 60000) {
+        reported = now;
+        logf("[d3d] %u%% of the last %u frames took more vblanks than the swap interval: this PC does not keep %d fps, "
+             "and the game steps a fixed 1/%d s per frame, so the world runs slower than real time%s. F2 records where "
+             "the time goes.",
+             pct, frames, g_cfg.fps, g_cfg.fps,
+             g_cfg.fps == 60 ? " (PC SETTINGS > DISPLAY > FRAME RATE 30 FPS is the original rate)" : "");
+    }
+    frames = late = 0;
+}
+
 // The Xbox flips at a vblank: D3DRS_PRESENTATIONINTERVAL ONE/TWO/THREE/FOUR = flip after that many
 // vblanks since the last flip; the _OR_IMMEDIATE variants (bit 31) flip at once when the frame is late,
 // the plain ones wait for the next vblank; IMMEDIATE alone does not wait.
 void pace_swap()
 {
-    static uint32_t last_vb;
+    static uint32_t last_vb, started;
     uint32_t iv = render_state()[XRS_PRESENTATIONINTERVAL];
     uint32_t n;
     switch (iv & 0xF) {
@@ -1021,13 +1046,19 @@ void pace_swap()
     case 8: n = 4; break;
     default: n = 1; break;
     }
+    if (!started && g_vblank_count.load()) { // no previous flip to measure against: do not count startup as late
+        last_vb = g_vblank_count.load();
+        started = 1;
+    }
     if (n) {
         uint32_t target = last_vb + n, now = g_vblank_count.load();
         if (now >= target && !(iv & 0x80000000)) target = now + 1;
         while (g_vblank_count.load() < target) WaitForSingleObject(g_vblank_wake, 4); // Sleep(1) polling woke 0-2 ms late
     }
     uint32_t now_vb = g_vblank_count.load();
-    perf::pace_end(now_vb - last_vb, n ? n : 1);
+    uint32_t taken = now_vb - last_vb;
+    perf::pace_end(taken, n ? n : 1);
+    report_slow_motion(taken, n);
     last_vb = now_vb;
 }
 
