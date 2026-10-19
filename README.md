@@ -16,7 +16,9 @@ The game is fully playable. Please report problems in the issue tracker and incl
 
 - Any render resolution (720p to 4K and beyond, or a multiple of the window size), anti-aliasing
 - Widescreen 16:9 (the game's own widescreen mode) or 4:3, adjustable field of view
-- 60 fps (the default) or the original 30 fps
+- 60 fps (the default) or the original 30 fps; the frame rate is a start-up setting and there is no rate above
+  60 (the game steps one fixed frame time per frame, so a faster rate is not a setting; see
+  `notes/higher-fps-audit.md`)
 - Mouse look, with the weapon swaying as it does with the stick; keys bound to the game's actions; XInput controllers
 - The port's settings in the game's own menus (Options > PC SETTINGS, and in the pause menu), including borderless fullscreen
 - Room reverb, the game's own brightness and gamma ramp; auto-aim off by default; every movie can be skipped
@@ -185,7 +187,10 @@ original report) turns the blur pass off on demand. See [issue #15 on the source
 repo](https://github.com/Spark198rus/black-pc/issues/15) for the exact files and settings.
 
 ## Known issues
-- The game was made for 30 fps; at 60 (the default) something may still run at the wrong speed.
+- The game was made for 30 fps; at 60 (the default) something may still run at the wrong speed. A 60 fps run
+  logs what is left to check (the other users of the game's 1/30 s constant and the code that reads its frame
+  time) and says when the PC cannot keep 60, so the world runs slower than real time (`notes/higher-fps-audit.md`
+  is the audit behind that, 2026-10-16).
 - On-screen prompts show Xbox controller buttons, even when playing with a keyboard.
 - Audio: the reverb is an approximation, some effect sends are not mixed, there is no subwoofer channel, and 3D sound uses distance and panning only.
 - **Only the NTSC-U build is supported.**
@@ -227,7 +232,8 @@ O jogo é totalmente jogável. Por favor, reporte problemas no rastreador de iss
 
 - Qualquer resolução de renderização (de 720p a 4K e além), anti-aliasing.
 - Widescreen 16:9 (o próprio modo widescreen nativo do jogo) ou 4:3, com campo de visão (FOV) ajustável.
-- 60 fps (padrão) ou os 30 fps originais.
+- 60 fps (padrão) ou os 30 fps originais; a taxa de quadros é definida na inicialização e não há taxa
+  acima de 60 (o jogo avança um tempo de quadro fixo por quadro; veja `notes/higher-fps-audit.md`).
 - Visão pelo mouse (Mouse look), com a arma balançando; teclas vinculadas às ações do jogo; suporte a controles XInput.
 - Configurações do port integradas aos próprios menus do jogo (Options > PC SETTINGS e no menu de pausa), incluindo tela cheia sem bordas (borderless fullscreen).
 - Reverberação de ambiente, rampa de brilho e gama do próprio jogo; mira automática (auto-aim) desativada por padrão; todas as cutscenes podem ser puladas.
@@ -376,10 +382,21 @@ Os ajustes do port ficam dentro do menu do jogo: **Options > PC SETTINGS** e no 
 Você pode usar argumentos de linha de comando (ex: `black.exe --fullscreen --resolution 1080 --fps 30 --fov 86`).
 
 ## Problemas Conhecidos
-- O jogo foi feito para 30 fps; a 60 fps (padrão) alguma física pode rodar na velocidade errada.
+- O jogo foi feito para 30 fps; a 60 fps (padrão) alguma física pode rodar na velocidade errada. Uma execução
+  a 60 fps registra no log o que ainda falta verificar (os outros usos da constante de 1/30 s do jogo e o
+  código que lê o tempo de quadro) e avisa quando o PC não consegue manter 60, fazendo o mundo rodar mais
+  devagar que o tempo real (`notes/higher-fps-audit.md`).
 - Os botões na tela mostram a interface do Xbox, mesmo no teclado.
 - Áudio: a reverberação é aproximada e não há canal de subwoofer.
 - **Apenas a versão NTSC-U é suportada.**
+- **Falsos positivos de antivírus / Defender.** Alguns scanners (Microsoft Defender, Malwarebytes) sinalizaram
+  builds de release com rótulos heurísticos genéricos (`Trojan:Script/Wacatac.H!ml`, `W32.Malware.1E0023F6`
+  MachineLearning/Anomalous). São detecções heurísticas sobre um binário incomum de recomp/decomp assistido por
+  IA, não uma carga maliciosa conhecida e reproduzível; ninguém relatou uma infecção real. Se o seu scanner
+  sinalizar: confira o SHA-256 do que você baixou com a página de release, compile a partir do código-fonte se
+  preferir não confiar no binário, e considere reportar o falso positivo ao fornecedor do antivírus. A longo
+  prazo isso exige assinatura de código e submissões aos fornecedores, o que está fora do que uma mudança no
+  código resolve.
 
 ## Compilando o Código-Fonte
 Requer Visual Studio 2022 ou 2026 com as ferramentas C++ x86 e CMake 3.24+.
