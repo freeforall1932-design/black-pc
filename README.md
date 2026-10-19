@@ -14,7 +14,9 @@ The game is fully playable. Please report problems in the issue tracker and incl
 
 - Any render resolution (720p to 4K and beyond, or a multiple of the window size), anti-aliasing
 - Widescreen 16:9 (the game's own widescreen mode) or 4:3, adjustable field of view
-- 60 fps (the default) or the original 30 fps
+- 60 fps (the default) or the original 30 fps; the frame rate is a start-up setting and there is no rate above
+  60 (the game steps one fixed frame time per frame, so a faster rate is not a setting - see
+  `notes/higher-fps-audit.md`)
 - Mouse look, with the weapon swaying as it does with the stick; keys bound to the game's actions; XInput
   controllers
 - The port's settings in the game's own menus (Options > PC SETTINGS, and in the pause menu), including borderless
@@ -140,7 +142,9 @@ repo](https://github.com/Spark198rus/black-pc/issues/15) for the exact files and
 ## Known issues
 
 - The game was made for 30 fps; at 60 (the default) something may still run at the wrong speed (PC SETTINGS > DISPLAY >
-  FRAME RATE), but I didn't notice.
+  FRAME RATE), but I didn't notice. A 60 fps run logs what is left to check (other users of the game's 1/30 s
+  constant, and the code that reads its frame time) and says when the PC cannot keep 60 and the world is
+  running slower than real time - `notes/higher-fps-audit.md` is the audit behind that (2026-10-16).
 - The game's on-screen prompts show Xbox controller buttons, also when you play with the keyboard.
 - Audio: the reverb is an approximation of the Xbox's, some effect sends are not mixed, there is no subwoofer
   channel, and 3D sound uses distance and panning only.

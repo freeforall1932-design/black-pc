@@ -194,7 +194,7 @@ bool parse_args()
             settings_mark_cli("fps");
             std::wstring v;
             if (!next(v)) return false;
-            g_cfg.fps = _wtoi(v.c_str()) == 60 ? 60 : 30;
+            g_cfg.fps = frame_rate_arg(_wtoi(v.c_str()));
         }
         else if (a == L"--mouse-sens") {
             settings_mark_cli("mouse_sens");
@@ -413,6 +413,7 @@ int run(void *reserve, unsigned reserve_size)
     g_exit_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     logc("BLACK loader " BLACK_VERSION " (blackrt) - XBE %s, hdd %s, log %s%s%s", narrow(g_cfg.xbe_path).c_str(), narrow(g_cfg.hdd_dir).c_str(),
          narrow(g_cfg.log_path).c_str(), g_cfg.trace ? ", trace" : "", g_cfg.strict ? ", strict" : "");
+    log_frame_rate_note(); // a frame rate from black.ini or --fps that was not 30 or 60 (frame_rate_arg)
     logf("address-space stub: reserve %p + 0x%x", reserve, reserve_size);
 
     std::string err;

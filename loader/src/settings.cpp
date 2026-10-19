@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "input/bindings.h"
+#include "timing.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -45,7 +46,7 @@ void settings_load()
         else if (k == "aa") g_cfg.aa = v != 0;
         else if (k == "seamfill") g_cfg.seam_fill = v != 0;
         else if (k == "effectsnative") g_cfg.effects_native = v != 0;
-        else if (k == "fps") g_cfg.fps = atoi(val) == 60 ? 60 : 30;
+        else if (k == "fps") g_cfg.fps = frame_rate_arg(atoi(val));
         else if (k == "widescreen") g_cfg.widescreen = v != 0;
         else if (k == "fullscreen") g_cfg.fullscreen = v != 0;
         else if (k == "gain") g_cfg.gain = std::clamp(v, 0.5f, 3.0f);

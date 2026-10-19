@@ -30,6 +30,13 @@ Open work on the BLACK PC port. Findings and addresses live in `NOTES.md`; this 
 - [ ] 60 fps (the default since 2026-10-12, `--fps 30` = original): world step 1/60 s, audio fine, weapon refire and reload blur now match
       30 fps (measured). Check the rest in play: other weapons/fire modes, animations, AI, effects, scripted scenes;
       60 became the default (user).
+      Audited 2026-10-16 (`notes/higher-fps-audit.md`): the fire rate now reproduces the game's own 30 fps timer exactly
+      (the old rounding was 1/30 s early on 0.1 s-multiple intervals), 60 fps is all-or-nothing (a weapon-site mismatch
+      stays at 30), `--fps <not 30/60>` no longer silently becomes 30, a PC that cannot hold the rate is logged, and the
+      run prints the other 1/30 s constant readers and the [object + 0x2013C] sites to check. To do on the first Windows
+      build: read those scan lines, look at FUN_001F0210 (0x1F0210) for `subss` vs `fsub` (decides the refire model), and
+      check whether the game's `setFrameRate` FUN_000BE560 is ever called after start-up (it would put the world step back
+      to 1/30 s at double speed). No rate above 60: see the audit's reasons (fixed step, vblank path, per-frame cost).
 - [ ] 60 fps slowdowns in busy scenes (user; also on PS2): the port's CPU overhead on the one game thread is the limit
       (perf recorder, NOTES.md). Round 1 done (texture checks once per frame, faster vertex conversion, shader key reuse,
       XInput): test scene 10.8 -> 5.1 ms; busy scene 78% -> 99.5% game speed. Round 2: stable textures checked every 16th frame.
