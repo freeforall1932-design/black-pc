@@ -4,7 +4,7 @@
 **Date of analysis:** 2026-10-19
 **Verdict:** This is **not a code problem and not a permissions problem**. It is **one conflicting hunk in `README.md`**, caused by two people editing the same "Known issues" list at the same time. Every other file the fork changed merges cleanly. The fix is a ~2-minute manual resolution.
 
-**Status: resolved.** `upstream/main` was merged into `arena/4ca71caa-black-pc` as **`4866dac`** on 2026-10-19, keeping both sides (upstream's rewrite + the fork's Mods section and antivirus note). The result differs from `upstream/main` only by the fork's 8 research files. See §8.
+**Status: resolved, twice.** `upstream/main` was merged into `arena/4ca71caa-black-pc` as **`4866dac`**, and when the fork's `main` then moved on (PR #3, 60 fps audit) it was merged in as **`c66ba6e`**. Both resolutions kept every side's content. The branch now differs from `upstream/main` only by the fork's own work (research + 60 fps audit), i.e. it is up to date with upstream and no longer behind its fork's `main`. See §8 and §8.1.
 
 ---
 
@@ -215,6 +215,36 @@ git diff --name-only --diff-filter=U  # empty
 ```
 
 **Effort:** one hunk, about two minutes. **Risk:** none to the build.
+
+### 8.1 Follow-up merge: the fork's `main` moved (PR #3)
+
+Six minutes after PR #2 was opened, the fork's `main` advanced from `8f8439d` to **`7027087`** (PR #3, "60 fps audit", merged 2026-10-19 22:59 UTC). That PR changed 12 files, **four of them in common with this branch's base area** — but only `README.md` actually overlapped with the upstream sync:
+
+| File | Fork PR #3 | Upstream sync (this branch) | Result |
+|---|---|---|---|
+| `README.md` | edited (Status + Known issues) | rewritten (upstream) | **conflict — resolved** |
+| `NOTES.md`, `TODO.md` | edited | untouched | auto-merged, PR #3 wins |
+| `loader/src/timing.cpp`, `timing.h`, `d3d/device.cpp`, `settings.cpp`, `main.cpp` | edited | untouched | auto-merged, byte-identical to PR #3 |
+| `notes/higher-fps-audit.md`, `refire_interval_test.cpp`, `timing_scan_test.cpp`, `issue-feasibility-report.md` | edited/added | untouched | auto-merged, byte-identical to PR #3 |
+
+The README conflict had **two hunks** this time, both from the same cause (upstream rewrote text that PR #3 had also edited):
+
+1. **Status** — upstream compacted the "60 fps (the default) or the original 30 fps" bullet; PR #3 had expanded it with "frame rate is a start-up setting, no rate above 60". Kept upstream's layout and folded PR #3's clarification in.
+2. **Known issues** — upstream compacted the 30 fps bullet; PR #3 had appended the diagnostic-log / `notes/higher-fps-audit.md` note. Kept upstream's layout and folded PR #3's sentence in.
+
+The Portuguese section was also brought in step: it gained both clarifications above plus the antivirus/Defender note (previously English-only), so the two languages no longer disagree.
+
+Verification after the follow-up merge:
+
+```bash
+grep -c '^<<<<<<<' README.md                        # 0
+diff <(git show upstream/main:README.md | grep '^#') <(grep '^#' README.md)
+#                                                # only "## Mods" extra
+git diff origin/main -- loader/ notes/ NOTES.md TODO.md   # empty: PR #3 code intact
+git diff upstream/main --stat                     # only the fork's own work
+```
+
+**Risk:** none to the build — the merge changed only `README.md` and `MERGE_REPORT.md`; every `.cpp`/`.h` file is byte-identical to fork `main` (`7027087`).
 
 ### Alternatives
 
